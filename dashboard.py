@@ -12,6 +12,31 @@ from datetime import datetime, timedelta
 
 # Dashboard config
 st.set_page_config(page_title="Live Facebook Ads Dashboard", page_icon="📊", layout="wide")
+# Password protection
+def check_password():
+    def password_entered():
+        if st.session_state["password"] == "1089":
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Don't store password
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        # First run, show input for password
+        st.text_input("Enter Access Code:", type="password", on_change=password_entered, key="password")
+        st.write("*Please enter the 4-digit access code to view the dashboard*")
+        return False
+    elif not st.session_state["password_correct"]:
+        # Password not correct, show input + error
+        st.text_input("Enter Access Code:", type="password", on_change=password_entered, key="password")
+        st.error("😞 Access code incorrect")
+        return False
+    else:
+        # Password correct
+        return True
+
+if not check_password():
+    st.stop()
 
 # Your API credentials and client accounts
 ACCESS_TOKEN = st.secrets["facebook_token"]
