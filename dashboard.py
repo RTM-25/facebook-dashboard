@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 st.set_page_config(page_title="Live Facebook Ads Dashboard", page_icon="📊", layout="wide")
 
 # Your API credentials and client accounts
-ACCESS_TOKEN = "EAAWf7ZCvqR4UBPKLGiZBooklVFnDZAVhfS1SAJUoy27lf4H67xBR0mqVtEby1gBh48nIUFJDXhEAUjIZAfNr2AttTNsUC63U8ibZBtge0JXNENBbecKlaJLy9WvVITGZCkLlHfeKNFKnOz5NZBLDrLq7TZC0U4cROwnl5iaaBtvjkgES5pOrxgBd5OKGbC6J5QtKLZBbBhEZCZB"
+ACCESS_TOKEN = st.secrets["facebook_token"]
 
 # Client database - easily add new clients here
 CLIENTS = {
