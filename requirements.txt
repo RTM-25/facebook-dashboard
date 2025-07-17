@@ -2,3 +2,4 @@ streamlit
 facebook-business
 plotly
 pandas
+requests
