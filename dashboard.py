@@ -1,4 +1,4 @@
-# Live Facebook Ads Dashboard - Multi-Client Version
+# Live Facebook Ads Dashboard - Multi-Client Version with Attentive
 # Save this as "dashboard.py"
 
 import streamlit as st
@@ -9,13 +9,15 @@ from facebook_business.adobjects.adsinsights import AdsInsights
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+import requests
+import json
 
 # Dashboard config
 st.set_page_config(page_title="Live Facebook Ads Dashboard", page_icon="📊", layout="wide")
 # Password protection
 def check_password():
     def password_entered():
-        if st.session_state["password"] == "1089":
+        if st.session_state["password"] == st.secrets["dashboard_password"]:
             st.session_state["password_correct"] = True
             del st.session_state["password"]  # Don't store password
         else:
@@ -46,27 +48,33 @@ CLIENTS = {
     "RAGE Nation Apparel": {
         "account_id": "act_1761456877511271",
         "logo_url": "https://i.ibb.co/Wjpyhwn/ZB166-RTM-Logos-11.png",
-        "avg_order_value": 50
+        "avg_order_value": 50,
+        "attentive_enabled": True,
+        "attentive_client_id": "210212"
     },
     "World POG Federation": {
         "account_id": "act_224902019311983",
         "logo_url": "https://i.ibb.co/Wjpyhwn/ZB166-RTM-Logos-11.png",
-        "avg_order_value": 75
+        "avg_order_value": 75,
+        "attentive_enabled": False
     },
     "Supplies Outlet": {
         "account_id": "act_147523547450881",
         "logo_url": "https://i.ibb.co/Wjpyhwn/ZB166-RTM-Logos-11.png",
-        "avg_order_value": 45
+        "avg_order_value": 45,
+        "attentive_enabled": False
     },
     "Tote n Carry - Main Account": {
         "account_id": "act_2524661660981967",
         "logo_url": "https://i.ibb.co/Wjpyhwn/ZB166-RTM-Logos-11.png",
-        "avg_order_value": 35
+        "avg_order_value": 35,
+        "attentive_enabled": False
     },
     "Tote n Carry - Secondary Account": {
         "account_id": "act_2003497536588787",
         "logo_url": "https://i.ibb.co/Wjpyhwn/ZB166-RTM-Logos-11.png",
-        "avg_order_value": 35
+        "avg_order_value": 35,
+        "attentive_enabled": False
     }
 }
 
@@ -169,6 +177,87 @@ def get_facebook_data(start_date, end_date, account_id):
     except Exception as e:
         st.error(f"API Error: {e}")
         return None
+
+# Attentive API functions
+def get_attentive_data(client_id, start_date, end_date):
+    try:
+        api_key = st.secrets["attentive_api_key"]
+        headers = {
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json'
+        }
+        
+        # Get campaigns data
+        campaigns_url = f'https://api.attentivemobile.com/v1/campaigns'
+        campaigns_response = requests.get(campaigns_url, headers=headers)
+        
+        if campaigns_response.status_code != 200:
+            st.error(f"Attentive API Error: {campaigns_response.status_code}")
+            return None
+            
+        campaigns_data = campaigns_response.json()
+        
+        # Get analytics data
+        analytics_url = f'https://api.attentivemobile.com/v1/analytics/campaigns'
+        analytics_params = {
+            'start_date': start_date.strftime('%Y-%m-%d'),
+            'end_date': end_date.strftime('%Y-%m-%d')
+        }
+        analytics_response = requests.get(analytics_url, headers=headers, params=analytics_params)
+        
+        if analytics_response.status_code == 200:
+            analytics_data = analytics_response.json()
+        else:
+            analytics_data = None
+        
+        return {
+            'campaigns': campaigns_data,
+            'analytics': analytics_data
+        }
+        
+    except Exception as e:
+        st.error(f"Attentive API Error: {e}")
+        return None
+
+def process_attentive_data(attentive_data):
+    if not attentive_data or not attentive_data.get('campaigns'):
+        return {
+            'total_revenue': 0,
+            'total_conversions': 0,
+            'total_messages_sent': 0,
+            'campaigns': []
+        }
+    
+    total_revenue = 0
+    total_conversions = 0
+    total_messages_sent = 0
+    processed_campaigns = []
+    
+    # Process campaign data
+    for campaign in attentive_data['campaigns'].get('data', []):
+        revenue = float(campaign.get('revenue', 0))
+        conversions = int(campaign.get('conversions', 0))
+        messages_sent = int(campaign.get('messages_sent', 0))
+        
+        total_revenue += revenue
+        total_conversions += conversions
+        total_messages_sent += messages_sent
+        
+        processed_campaigns.append({
+            'name': campaign.get('name', 'Unknown'),
+            'revenue': revenue,
+            'conversions': conversions,
+            'messages_sent': messages_sent,
+            'ctr': float(campaign.get('click_rate', 0)),
+            'cvr': float(campaign.get('conversion_rate', 0))
+        })
+    
+    return {
+        'total_revenue': total_revenue,
+        'total_conversions': total_conversions,
+        'total_messages_sent': total_messages_sent,
+        'campaigns': processed_campaigns
+    }
 
 # Function to calculate ROAS
 def calculate_roas(spend, revenue):
@@ -313,6 +402,18 @@ st.markdown(f"**Last Updated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 with st.spinner(f"🔄 Pulling {selected_client} data from {start_date.strftime('%m/%d')} to {end_date.strftime('%m/%d')}..."):
     data = get_facebook_data(start_date, end_date, current_account_id)
 
+# Check if client has Attentive enabled and get SMS data
+attentive_data = None
+if client_info.get("attentive_enabled", False):
+    with st.spinner(f"🔄 Pulling SMS data for {selected_client}..."):
+        attentive_raw = get_attentive_data(
+            client_info.get("attentive_client_id"), 
+            start_date, 
+            end_date
+        )
+        if attentive_raw:
+            attentive_data = process_attentive_data(attentive_raw)
+
 if data:
     # Process all levels of data with client-specific AOV
     campaigns_data = process_insights_data(data['campaigns'], current_aov)
@@ -326,27 +427,55 @@ if data:
     total_impressions = sum(item['impressions'] for item in campaigns_data)
     total_clicks = sum(item['clicks'] for item in campaigns_data)
     
-    # Top metrics row
-    col1, col2, col3, col4, col5 = st.columns(5)
-    
-    with col1:
-        st.metric("💰 Total Spend", f"${total_spend:,.2f}")
-    with col2:
-        st.metric("🛒 Total Purchases", f"{total_purchases:,}")
-    with col3:
-        overall_roas = calculate_roas(total_spend, total_revenue)
-        st.metric("📈 Overall ROAS", f"{overall_roas:.2f}x")
-    with col4:
-        avg_cpa = total_spend / total_purchases if total_purchases > 0 else 0
-        st.metric("🎯 Avg CPA", f"${avg_cpa:.2f}")
-    with col5:
-        overall_ctr = (total_clicks / total_impressions * 100) if total_impressions > 0 else 0
-        st.metric("👆 Overall CTR", f"{overall_ctr:.2f}%")
+    # Enhanced metrics row with SMS data
+    if attentive_data:
+        # Combined metrics
+        sms_revenue = attentive_data['total_revenue']
+        sms_conversions = attentive_data['total_conversions']
+        combined_revenue = total_revenue + sms_revenue
+        combined_roas = calculate_roas(total_spend, combined_revenue)
+        
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        
+        with col1:
+            st.metric("💰 FB Spend", f"${total_spend:,.2f}")
+        with col2:
+            st.metric("📱 SMS Revenue", f"${sms_revenue:,.2f}")
+        with col3:
+            st.metric("🎯 Combined ROAS", f"{combined_roas:.2f}x")
+        with col4:
+            st.metric("🛒 Total Conversions", f"{total_purchases + sms_conversions:,}")
+        with col5:
+            overall_roas = calculate_roas(total_spend, total_revenue)
+            st.metric("📊 FB ROAS", f"{overall_roas:.2f}x")
+        with col6:
+            overall_ctr = (total_clicks / total_impressions * 100) if total_impressions > 0 else 0
+            st.metric("👆 Overall CTR", f"{overall_ctr:.2f}%")
+    else:
+        # Original metrics (Facebook only)
+        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        with col1:
+            st.metric("💰 Total Spend", f"${total_spend:,.2f}")
+        with col2:
+            st.metric("🛒 Total Purchases", f"{total_purchases:,}")
+        with col3:
+            overall_roas = calculate_roas(total_spend, total_revenue)
+            st.metric("📈 Overall ROAS", f"{overall_roas:.2f}x")
+        with col4:
+            avg_cpa = total_spend / total_purchases if total_purchases > 0 else 0
+            st.metric("🎯 Avg CPA", f"${avg_cpa:.2f}")
+        with col5:
+            overall_ctr = (total_clicks / total_impressions * 100) if total_impressions > 0 else 0
+            st.metric("👆 Overall CTR", f"{overall_ctr:.2f}%")
     
     st.markdown("---")
     
     # Create tabs for different levels
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "🎯 Campaigns", "🔍 Ad Sets", "📢 Ads"])
+    if attentive_data:
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "🎯 Campaigns", "🔍 Ad Sets", "📢 Ads", "📱 SMS Performance"])
+    else:
+        tab1, tab2, tab3, tab4 = st.tabs(["📊 Overview", "🎯 Campaigns", "🔍 Ad Sets", "📢 Ads"])
     
     with tab1:
         # Overview metrics
@@ -517,6 +646,69 @@ if data:
         else:
             st.info("No ad data found for the selected time period.")
     
+    # SMS Performance Tab (only shows if Attentive is enabled)
+    if attentive_data:
+        with tab5:
+            st.header("📱 SMS Campaign Performance")
+            
+            # SMS summary metrics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("💸 Total SMS Revenue", f"${attentive_data['total_revenue']:,.2f}")
+            with col2:
+                st.metric("🎯 SMS Conversions", f"{attentive_data['total_conversions']:,}")
+            with col3:
+                st.metric("📤 Messages Sent", f"{attentive_data['total_messages_sent']:,}")
+            
+            # SMS campaigns table
+            if attentive_data['campaigns']:
+                st.subheader("📱 SMS Campaign Breakdown")
+                sms_df = pd.DataFrame(attentive_data['campaigns'])
+                
+                # Format for display
+                display_sms_df = sms_df.copy()
+                display_sms_df['revenue'] = display_sms_df['revenue'].apply(lambda x: f"${x:,.2f}")
+                display_sms_df['ctr'] = display_sms_df['ctr'].apply(lambda x: f"{x:.2f}%")
+                display_sms_df['cvr'] = display_sms_df['cvr'].apply(lambda x: f"{x:.2f}%")
+                display_sms_df['messages_sent'] = display_sms_df['messages_sent'].apply(lambda x: f"{x:,}")
+                
+                st.dataframe(display_sms_df, use_container_width=True)
+                
+                # SMS recommendations
+                st.subheader("📱 SMS Optimization Recommendations")
+                for _, campaign in sms_df.iterrows():
+                    if campaign['cvr'] > 5.0 and campaign['revenue'] > 1000:
+                        st.success(f"✅ **SCALE SMS:** {campaign['name']}")
+                        st.write(f"→ High CVR: {campaign['cvr']:.2f}% | Revenue: ${campaign['revenue']:,.2f}")
+                    elif campaign['ctr'] < 1.0 and campaign['messages_sent'] > 500:
+                        st.warning(f"🔄 **REFRESH SMS:** {campaign['name']}")
+                        st.write(f"→ Low CTR: {campaign['ctr']:.2f}% | Try new creative or timing")
+                    elif campaign['revenue'] < 100 and campaign['messages_sent'] > 1000:
+                        st.error(f"❌ **PAUSE SMS:** {campaign['name']}")
+                        st.write(f"→ Poor performance: ${campaign['revenue']:,.2f} revenue from {campaign['messages_sent']:,} messages")
+            
+            # Cross-channel insights
+            if total_revenue > 0 and attentive_data['total_revenue'] > 0:
+                st.markdown("---")
+                st.subheader("🔗 Cross-Channel Insights")
+                
+                fb_contribution = (total_revenue / (total_revenue + attentive_data['total_revenue'])) * 100
+                sms_contribution = (attentive_data['total_revenue'] / (total_revenue + attentive_data['total_revenue'])) * 100
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("📘 Facebook Contribution", f"{fb_contribution:.1f}%")
+                    st.write(f"${total_revenue:,.2f} revenue from ads")
+                with col2:
+                    st.metric("📱 SMS Contribution", f"{sms_contribution:.1f}%")
+                    st.write(f"${attentive_data['total_revenue']:,.2f} revenue from SMS")
+                
+                combined_revenue = total_revenue + attentive_data['total_revenue']
+                combined_roas = calculate_roas(total_spend, combined_revenue)
+                st.info(f"💡 **Insight:** Your combined marketing generates ${combined_revenue:,.2f} with a {combined_roas:.2f}x ROAS!")
+            else:
+                st.info("No SMS campaign data found for the selected time period.")
+    
     # Charts section
     if campaigns_data:
         st.markdown("---")
@@ -575,6 +767,11 @@ st.sidebar.markdown(f"""
 **Days Selected:** {(end_date - start_date).days + 1}
 """)
 
+if client_info.get("attentive_enabled", False):
+    st.sidebar.markdown("📱 **SMS Integration:** Enabled")
+else:
+    st.sidebar.markdown("📱 **SMS Integration:** Disabled")
+
 if st.sidebar.button("🔄 Refresh Data"):
     st.rerun()
 
@@ -584,7 +781,13 @@ if 'total_spend' in locals():
     st.sidebar.metric("Total Campaigns", len(campaigns_data))
     st.sidebar.metric("Active Spend", f"${total_spend:,.2f}")
     st.sidebar.metric("Total Clicks", f"{total_clicks:,}")
+    
+    if attentive_data:
+        st.sidebar.metric("SMS Revenue", f"${attentive_data['total_revenue']:,.2f}")
 
 # Footer
 st.markdown("---")
-st.markdown("*Dashboard built with Python & Streamlit | Data from Facebook Marketing API*")
+if attentive_data:
+    st.markdown("*Dashboard built with Python & Streamlit | Data from Facebook Marketing API & Attentive SMS*")
+else:
+    st.markdown("*Dashboard built with Python & Streamlit | Data from Facebook Marketing API*")
